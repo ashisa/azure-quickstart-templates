@@ -2,102 +2,67 @@
   "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
   "contentVersion": "1.0.0.0",
   "parameters": {
-    "adminUsername": {
+    "Name": {
       "type": "string",
       "metadata": {
-        "description": "Admin username"
+        "description": "Name of the load balancer"
       }
     },
-    "adminPassword": {
-      "type": "securestring",
+    "Condition": {
+      "type": "bool",
       "metadata": {
-        "description": "Admin password"
+        "description": "Set to True if LB needs to be created"
       }
     },
-    "vmNamePrefix": {
+    "Count": {
+      "type": "int",
+      "metadata": {
+        "description": "Same as number of VMs in the main template"
+      }
+    },
+    "subnet1Ref": {
       "type": "string",
-      "defaultValue": "BackendVM",
       "metadata": {
-        "description": "Prefix to use for VM names"
+        "description": "Reference to the subnet"
       }
     },
-    "location": {
+    "Location": {
       "type": "string",
-      "defaultValue": "[resourceGroup().location]",
       "metadata": {
-        "description": "Location for all resources."
+        "description": "Location of the load balancer"
       }
     }
   },
   "variables": {
-    "availabilitySetName": "AvSet",
-    "storageAccountType": "Standard_LRS",
-    "storageAccountName": "[uniqueString(resourceGroup().id)]",
-    "virtualNetworkName": "vNet",
-    "subnetName": "backendSubnet",
-    "loadBalancerName": "ilb",
-    "networkInterfaceName": "nic",
-    "subnetRef": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('virtualNetworkName'), variables('subnetName'))]",
-    "numberOfInstances": 2,
-    "lbID": "[resourceId('Microsoft.Network/loadBalancers', variables('loadBalancerName'))]"
+    "LBID": "[resourceId('Microsoft.Network/loadBalancers', concat(parameters('Name'),'lb'))]",
+    "LBPIPID": "[resourceId('Microsoft.Network/publicIPAddresses', concat(parameters('Name'), '-pip'))]",
+    "FrontEndIPConfigID": "[concat(resourceId('Microsoft.Network/loadBalancers', concat(parameters('Name'),'lb')),'/frontendIPConfigurations/LoadBalancerFrontEnd')]",
+    "LBPoolID": "[concat(resourceId('Microsoft.Network/loadBalancers', concat(parameters('Name'),'lb')),'/backendAddressPools/BackendPool1')]",
+    "LBProbeID": "[concat(resourceId('Microsoft.Network/loadBalancers', concat(parameters('Name'),'lb')),'/probes/tcpProbe')]"
   },
   "resources": [
     {
-      "apiVersion": "2018-02-01",
-      "type": "Microsoft.Storage/storageAccounts",
-      "name": "[variables('storageAccountName')]",
-      "location": "[parameters('location')]",
-      "kind": "Storage",
-      "sku": {
-        "name": "[variables('storageAccountType')]"
-      }
-    },
-    {
-      "apiVersion": "2018-04-01",
-      "type": "Microsoft.Compute/availabilitySets",
-      "location": "[parameters('location')]",
-      "name": "[variables('availabilitySetName')]",
+      "condition": "[parameters('Condition')]",
+      "apiVersion": "2015-05-01-preview",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "name": "[concat(parameters('Name'), '-pip')]",
+      "location": "[parameters('Location')]",
       "properties": {
-        "PlatformUpdateDomainCount": 2,
-        "PlatformFaultDomainCount": 2
-      },
-      "sku": {
-        "name": "Aligned"
+        "publicIPAllocationMethod": "Dynamic"
       }
     },
     {
-      "apiVersion": "2018-04-01",
-      "type": "Microsoft.Network/virtualNetworks",
-      "name": "[variables('virtualNetworkName')]",
-      "location": "[parameters('location')]",
-      "properties": {
-        "addressSpace": {
-          "addressPrefixes": [
-            "10.0.0.0/16"
-          ]
-        },
-        "subnets": [
-          {
-            "name": "[variables('subnetName')]",
-            "properties": {
-              "addressPrefix": "10.0.2.0/24"
-            }
-          }
-        ]
-      }
-    },
-    {
-      "apiVersion": "2018-04-01",
+      "condition": "[parameters('Condition')]",
       "type": "Microsoft.Network/networkInterfaces",
-      "name": "[concat(variables('networkInterfaceName'), copyindex())]",
-      "location": "[parameters('location')]",
+      "name": "[concat(parameters('Name'), 'nic', copyindex(1))]",
+      "apiVersion": "2016-03-30",
+      "location": "[parameters('Location')]",
       "copy": {
         "name": "nicLoop",
-        "count": "[variables('numberOfInstances')]"
+        "count": "[parameters('Count')]"
       },
       "dependsOn": [
-        "[variables('virtualNetworkName')]",
-        "[variables('loadBalancerName')]"
+        "[concat('Microsoft.Network/loadBalancers/', parameters('Name'), 'lb')]"
       ],
       "properties": {
         "ipConfigurations": [
@@ -106,11 +71,11 @@
             "properties": {
               "privateIPAllocationMethod": "Dynamic",
               "subnet": {
-                "id": "[variables('subnetRef')]"
+                "id": "[parameters('subnet1Ref')]"
               },
               "loadBalancerBackendAddressPools": [
                 {
-                  "id": "[concat(variables('lbID'), '/backendAddressPools/BackendPool1')]"
+                  "id": "[concat(variables('LBID'), '/backendAddressPools/BackendPool1')]"
                 }
               ]
             }
@@ -119,24 +84,24 @@
       }
     },
     {
-      "apiVersion": "2018-04-01",
+      "condition": "[parameters('Condition')]",
+      "apiVersion": "2015-05-01-preview",
+      "name": "[concat(parameters('Name'),'lb')]",
       "type": "Microsoft.Network/loadBalancers",
-      "name": "[variables('loadBalancerName')]",
-      "location": "[parameters('location')]",
+      "location": "[parameters('Location')]",
       "dependsOn": [
-        "[variables('virtualNetworkName')]"
+        "[variables('LBPIPID')]"
       ],
       "properties": {
         "frontendIPConfigurations": [
           {
+            "name": "LoadBalancerFrontEnd",
             "properties": {
               "subnet": {
-                "id": "[variables('subnetRef')]"
+                "id": "[parameters('subnet1Ref')]"
               },
-              "privateIPAddress": "10.0.2.6",
-              "privateIPAllocationMethod": "Static"
-            },
-            "name": "LoadBalancerFrontend"
+              "privateIPAllocationMethod": "Dynamic"
+            }
           }
         ],
         "backendAddressPools": [
@@ -146,88 +111,39 @@
         ],
         "loadBalancingRules": [
           {
+            "name": "LBRule",
             "properties": {
               "frontendIPConfiguration": {
-                "id": "[concat(resourceId('Microsoft.Network/loadBalancers', variables('loadBalancerName')), '/frontendIpConfigurations/LoadBalancerFrontend')]"
+                "id": "[variables('FrontEndIPConfigID')]"
               },
               "backendAddressPool": {
-                "id": "[concat(resourceId('Microsoft.Network/loadBalancers', variables('loadBalancerName')), '/backendAddressPools/BackendPool1')]"
-              },
-              "probe": {
-                "id": "[concat(resourceId('Microsoft.Network/loadBalancers', variables('loadBalancerName')), '/probes/lbprobe')]"
+                "id": "[variables('LBPoolID')]"
               },
               "protocol": "Tcp",
               "frontendPort": 80,
               "backendPort": 80,
-              "idleTimeoutInMinutes": 15
-            },
-            "Name": "lbrule"
+              "enableFloatingIP": false,
+              "idleTimeoutInMinutes": 5,
+              "probe": {
+                "id": "[variables('LBProbeID')]"
+              }
+            }
           }
         ],
         "probes": [
           {
+            "name": "tcpProbe",
             "properties": {
               "protocol": "Tcp",
               "port": 80,
-              "intervalInSeconds": 15,
+              "intervalInSeconds": 5,
               "numberOfProbes": 2
-            },
-            "name": "lbprobe"
+            }
           }
         ]
       }
-    },
-    {
-      "apiVersion": "2018-04-01",
-      "type": "Microsoft.Compute/virtualMachines",
-      "name": "[concat(parameters('vmNamePrefix'), copyindex())]",
-      "copy": {
-        "name": "virtualMachineLoop",
-        "count": "[variables('numberOfInstances')]"
-      },
-      "location": "[parameters('location')]",
-      "dependsOn": [
-        "[variables('storageAccountName')]",
-        "nicLoop",
-        "[variables('availabilitySetName')]"
-      ],
-      "properties": {
-        "availabilitySet": {
-          "id": "[resourceId('Microsoft.Compute/availabilitySets',variables('availabilitySetName'))]"
-        },
-        "hardwareProfile": {
-          "vmSize": "Standard_DS2_V2"
-        },
-        "osProfile": {
-          "computerName": "[concat(parameters('vmNamePrefix'), copyIndex())]",
-          "adminUsername": "[parameters('adminUsername')]",
-          "adminPassword": "[parameters('adminPassword')]"
-        },
-        "storageProfile": {
-          "imageReference": {
-            "publisher": "MicrosoftWindowsServer",
-            "offer": "WindowsServer",
-            "sku": "2016-Datacenter",
-            "version": "latest"
-          },
-          "osDisk": {
-            "createOption": "FromImage"
-          }
-        },
-        "networkProfile": {
-          "networkInterfaces": [
-            {
-              "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(variables('networkInterfaceName'), copyindex()))]"
-            }
-          ]
-        },
-        "diagnosticsProfile": {
-          "bootDiagnostics": {
-            "enabled": true,
-            "storageUri": "[reference(variables('storageAccountName')).primaryEndpoints.blob]"
-          }
-        }
-      }
     }
-  ]
+  ],
+  "outputs": {
+  }
 }
